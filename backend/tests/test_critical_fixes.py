@@ -209,9 +209,7 @@ def test_analysis_engine_raises_value_error_on_invalid_price():
 def test_new_telegram_signal_formatting():
     from app.utils.formatting import generate_telegram_message
     
-    # 1. Test SELL LIMIT (Limit Order format)
-    # entry = 4474.10, current = 4455.50, atr = 1.5, direction = SELL
-    # entry - current = 18.6 > atr * 0.15 = 0.225 -> Limit Order
+    # 1. Test Low Confidence (Grade C / Risk High / Action WAIT FOR CONFIRMATION / 🚨 emoji)
     msg_limit = generate_telegram_message(
         symbol="XAUUSD",
         current_price=4455.50,
@@ -223,10 +221,11 @@ def test_new_telegram_signal_formatting():
         tp3=4440,
         rr=3.6,
         lot_size=0.01,
-        grade="B",  # Medium strength
+        grade="C",
         atr=1.5,
         support=4456.92,
-        resistance=4474.10
+        resistance=4474.10,
+        reason="Sell resistance retest"
     )
     
     lines_limit = msg_limit.splitlines()
@@ -237,12 +236,14 @@ def test_new_telegram_signal_formatting():
     assert "TP1: 4465" in lines_limit
     assert "TP2: 4455" in lines_limit
     assert "TP3: 4440" in lines_limit
-    assert "RR: 1:3.6 | Lot: 0.01" in lines_limit
-    assert "Strength: Medium" in lines_limit
-    assert "Action: Wait for Entry" in lines_limit
+    assert "RR: 1:3.6" in lines_limit
+    assert "Lot: 0.01" in lines_limit
+    assert "Grade: C" in lines_limit
+    assert "Risk: High" in lines_limit
+    assert "WAIT FOR CONFIRMATION" in lines_limit
+    assert "Sell resistance retest" in lines_limit
     
-    # 2. Test SELL NOW (Market Order format, within 0.15 * atr)
-    # entry = 4455.50, current = 4455.50
+    # 2. Test High Confidence Market (Grade A / Action ENTER NOW / 🚀 emoji / no Risk: High)
     msg_market = generate_telegram_message(
         symbol="XAUUSD",
         current_price=4455.50,
@@ -254,45 +255,25 @@ def test_new_telegram_signal_formatting():
         tp3=4430,
         rr=2.8,
         lot_size=0.01,
-        grade="A",  # Strong strength
+        grade="A",
         atr=1.5,
         support=4456.92,
-        resistance=4474.10
+        resistance=4474.10,
+        reason="Support bounce"
     )
     lines_market = msg_market.splitlines()
-    assert lines_market[0] == "🚨 XAUUSD | SELL NOW"
+    assert lines_market[0] == "🚀 XAUUSD | SELL"
     assert "Price: 4455.50" in lines_market
-    assert not any(l.startswith("Entry:") for l in lines_market)
+    assert "Entry: 4455.50" in lines_market
     assert "SL: 4462" in lines_market
     assert "TP1: 4448" in lines_market
     assert "TP2: 4440" in lines_market
     assert "TP3: 4430" in lines_market
-    assert "RR: 1:2.8 | Lot: 0.01" in lines_market
-    assert "Strength: Strong" in lines_market
-    assert "Action: Enter Now" in lines_market
+    assert "RR: 1:2.8" in lines_market
+    assert "Lot: 0.01" in lines_market
+    assert "Grade: A" in lines_market
+    assert "Risk: High" not in lines_market
+    assert "ENTER NOW" in lines_market
+    assert "Support bounce" in lines_market
 
-    # 3. Test Speculative (No Quality Setup format)
-    msg_spec = generate_telegram_message(
-        symbol="XAUUSD",
-        current_price=4455.50,
-        entry_price=4474.10,
-        direction="SELL",
-        stop_loss=4479.29,
-        tp1=4465,
-        tp2=4455,
-        tp3=4440,
-        rr=3.6,
-        lot_size=0.01,
-        grade="Speculative",
-        atr=1.5,
-        support=4456.92,
-        resistance=4474.10
-    )
-    lines_spec = msg_spec.splitlines()
-    assert lines_spec[0] == "⚠️ XAUUSD"
-    assert "Price: 4455.50" in lines_spec
-    assert "Buy Above: 4474.10" in lines_spec
-    assert "Sell Below: 4456.92" in lines_spec
-    assert "Expected: Bearish" in lines_spec
-    assert "Action: Wait" in lines_spec
 

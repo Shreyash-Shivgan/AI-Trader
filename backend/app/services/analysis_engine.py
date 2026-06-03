@@ -172,13 +172,19 @@ class AnalysisEngine:
             },
             threshold=50.0,
         )
+        pref_dir = "bullish" if trend["trend"] in {"bullish", "strong_bullish"} else "bearish"
+        alt_dir = "bearish" if pref_dir == "bullish" else "bullish"
+
         setup = generate_trade_setup(
             candles,
-            direction=(
-                "bullish"
-                if trend["trend"] in {"bullish", "strong_bullish"}
-                else "bearish"
-            ),
+            direction=pref_dir,
+            confidence_score=confluence.total,
+            account_balance=account_balance,
+            risk_percent=risk_percent,
+        )
+        alternative_setup = generate_trade_setup(
+            candles,
+            direction=alt_dir,
             confidence_score=confluence.total,
             account_balance=account_balance,
             risk_percent=risk_percent,
@@ -238,6 +244,7 @@ class AnalysisEngine:
             critic=critic,
             trade_review=trade_review.to_dict(),
             session=session,
+            alternative_setup=alternative_setup,
         )
 
         logger.info(
@@ -259,6 +266,8 @@ class AnalysisEngine:
             "risk": risk.to_dict(),
             "confluence": confluence.to_dict(),
             "trade_setup": setup,
+            "preferred_setup": setup,
+            "alternative_setup": alternative_setup,
             "trade_review": trade_review.to_dict(),
             "critic": critic,
             "approved": trade_review.approved,

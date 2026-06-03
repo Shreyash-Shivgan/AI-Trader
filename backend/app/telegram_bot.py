@@ -13,7 +13,7 @@ from app.services.analysis_engine import AnalysisEngine
 from app.database import SessionLocal
 
 from sqlalchemy.orm import Session
-from app.utils.formatting import format_price, generate_telegram_message
+from app.utils.formatting import format_price, generate_telegram_message, determine_reason
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
@@ -95,55 +95,106 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     expected_direction = "Bullish" if side_val == "buy" else "Bearish"
 
     # Risk Reward
-    rr_val = float(trade_setup.get("risk_reward_ratio", 0.0) or 0.0)
-    rr_str = f"1:{rr_val:.1f}" if rr_val else "1:0.0"
+    pref_setup = result.get("preferred_setup", trade_setup)
+    alt_setup = result.get("alternative_setup", trade_setup)
 
-    # Lot size
-    lot_val = float(trade_setup.get("lot_size", 0.0) or 0.0)
-    lot_size_str = "N/A" if lot_val <= 0 else f"{lot_val:.2f}"
-
-    direction_str = "BUY" if side_val == "buy" else "SELL"
     atr = float(result.get("indicators", {}).get("atr", 1.5) or 1.5)
-    entry_price = float(trade_setup.get("entry_price", 0.0) or 0.0)
-    stop_loss = float(trade_setup.get("stop_loss", 0.0) or 0.0)
-    tp1 = float(trade_setup.get("take_profit_1", 0.0) or 0.0)
-    tp2 = float(trade_setup.get("take_profit_2", 0.0) or 0.0)
-    tp3 = float(trade_setup.get("take_profit_3", 0.0) or 0.0)
-
-    # Determine Grade and Quality
     confidence = float(review.get("confidence_score", map_data.get("confidence_score", 0.0)) or 0.0)
-    
+
+    try:
+        support_f = float(support_val)
+    except (ValueError, TypeError):
+        support_f = current_price
+
+    try:
+        resistance_f = float(resistance_val)
+    except (ValueError, TypeError):
+        resistance_f = current_price
+
     def determine_grade(conf: float, rr: float) -> str:
+        if conf < settings.confidence_threshold:
+            return "C"
         if conf >= 85 and rr >= 3.0:
             return "A+"
         if conf >= 75 and rr >= 2.5:
             return "A"
         if conf >= 65 and rr >= 2.0:
             return "B"
-        if conf >= 50 and rr >= 1.2:
-            return "C"
-        return "Speculative"
+        return "C"
 
-    grade = determine_grade(confidence, rr_val)
+    # Preferred Setup details
+    pref_side = str(pref_setup.get("trade_side", "buy")).lower()
+    pref_dir_str = "BUY" if pref_side == "buy" else "SELL"
+    pref_entry = float(pref_setup.get("entry_price", 0.0) or 0.0)
+    pref_sl = float(pref_setup.get("stop_loss", 0.0) or 0.0)
+    pref_tp1 = float(pref_setup.get("take_profit_1", 0.0) or 0.0)
+    pref_tp2 = float(pref_setup.get("take_profit_2", 0.0) or 0.0)
+    pref_tp3 = float(pref_setup.get("take_profit_3", 0.0) or 0.0)
+    pref_rr = float(pref_setup.get("risk_reward_ratio", 0.0) or 0.0)
+    pref_lot = float(pref_setup.get("lot_size", 0.0) or 0.0)
+    pref_grade = determine_grade(confidence, pref_rr)
+    pref_reason = determine_reason(pref_dir_str, pref_entry, support_f, resistance_f, atr)
 
-    message_text = generate_telegram_message(
+    pref_msg = generate_telegram_message(
         symbol=symbol_header,
         current_price=current_price,
-        entry_price=entry_price,
-        direction=direction_str,
-        stop_loss=stop_loss,
-        tp1=tp1,
-        tp2=tp2,
-        tp3=tp3,
-        rr=rr_val,
-        lot_size=lot_val,
-        grade=grade,
+        entry_price=pref_entry,
+        direction=pref_dir_str,
+        stop_loss=pref_sl,
+        tp1=pref_tp1,
+        tp2=pref_tp2,
+        tp3=pref_tp3,
+        rr=pref_rr,
+        lot_size=pref_lot,
+        grade=pref_grade,
         atr=atr,
-        support=support_val,
-        resistance=resistance_val,
+        support=support_f,
+        resistance=resistance_f,
+        reason=pref_reason,
     )
 
-    await update.message.reply_text(message_text)
+    # Alternative Setup details
+    alt_side = str(alt_setup.get("trade_side", "sell")).lower()
+    alt_dir_str = "BUY" if alt_side == "buy" else "SELL"
+    alt_entry = float(alt_setup.get("entry_price", 0.0) or 0.0)
+    alt_sl = float(alt_setup.get("stop_loss", 0.0) or 0.0)
+    alt_tp1 = float(alt_setup.get("take_profit_1", 0.0) or 0.0)
+    alt_tp2 = float(alt_setup.get("take_profit_2", 0.0) or 0.0)
+    alt_tp3 = float(alt_setup.get("take_profit_3", 0.0) or 0.0)
+    alt_rr = float(alt_setup.get("risk_reward_ratio", 0.0) or 0.0)
+    alt_lot = float(alt_setup.get("lot_size", 0.0) or 0.0)
+    alt_grade = determine_grade(confidence, alt_rr)
+    alt_reason = determine_reason(alt_dir_str, alt_entry, support_f, resistance_f, atr)
+
+    alt_msg = generate_telegram_message(
+        symbol=symbol_header,
+        current_price=current_price,
+        entry_price=alt_entry,
+        direction=alt_dir_str,
+        stop_loss=alt_sl,
+        tp1=alt_tp1,
+        tp2=alt_tp2,
+        tp3=alt_tp3,
+        rr=alt_rr,
+        lot_size=alt_lot,
+        grade=alt_grade,
+        atr=atr,
+        support=support_f,
+        resistance=resistance_f,
+        reason=alt_reason,
+    )
+
+    final_message = (
+        f"PREFERRED TRADE\n"
+        f"{pref_msg}\n"
+        f"\n"
+        f"---\n"
+        f"\n"
+        f"BEST ALTERNATIVE TRADE\n"
+        f"{alt_msg}"
+    )
+
+    await update.message.reply_text(final_message)
 
 
 async def watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
