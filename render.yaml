@@ -63,15 +63,15 @@ services:
       - key: ENVIRONMENT
         value: production
 
-# 3. PostgreSQL Database Instance
+  # 3. Redis Instance (Defined as a service on Render)
+  - type: redis
+    name: ai-trader-redis
+    plan: free
+    ipAllowList: [] # Restrict access to internal services only
+
+# PostgreSQL Database Instance
 databases:
   - name: ai-trader-db
     plan: free
     databaseName: ai_trader
     user: ai_trader
-
-# 4. Redis Instance
-redis:
-  - name: ai-trader-redis
-    plan: free
-    ipAllowList: [] # Restrict access to internal services only
