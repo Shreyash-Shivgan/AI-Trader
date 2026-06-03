@@ -8,6 +8,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://ai_trader:ai_trader@postgres:5432/ai_trader
       - REDIS_URL=redis://redis:6379/0
+      - RUN_BOT_IN_APP=false
     env_file:
       - ./.env
     ports:

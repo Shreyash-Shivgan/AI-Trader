@@ -22,6 +22,17 @@ from app.services.scanner import scanner_service
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 
 
+import threading
+import os
+
+def run_bot_in_background():
+    from app.telegram_bot import main as bot_main
+    try:
+        bot_main()
+    except Exception as exc:
+        logging.error("Telegram bot background thread failed: %s", exc, exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -31,6 +42,12 @@ async def lifespan(app: FastAPI):
     else:
         # start background scanner only when the DB is reachable
         scanner_service.start()
+        
+    # Run bot in the same process/container if enabled
+    if settings.telegram_bot_token and os.getenv("RUN_BOT_IN_APP", "true").lower() == "true":
+        logging.info("Starting Telegram Bot in background thread...")
+        threading.Thread(target=run_bot_in_background, daemon=True).start()
+        
     yield
     # shutdown background scanner
     scanner_service.shutdown()

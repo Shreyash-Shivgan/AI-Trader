@@ -1,8 +1,9 @@
 services:
-  # 1. Web Service (API & Scanner)
+  # 1. Web Service (API & Scanner & Bot)
   - type: web
     name: ai-trader-api
     env: python
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     rootDir: backend
@@ -13,11 +14,8 @@ services:
         fromDatabase:
           name: ai-trader-db
           property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: ai-trader-redis
-          property: connectionString
+      - key: RUN_BOT_IN_APP
+        value: "true"
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
@@ -31,45 +29,7 @@ services:
       - key: ENVIRONMENT
         value: production
 
-  # 2. Background Worker (Telegram Bot)
-  - type: worker
-    name: ai-trader-bot
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m app.telegram_bot
-    rootDir: backend
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
-      - key: DATABASE_URL
-        fromDatabase:
-          name: ai-trader-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: ai-trader-redis
-          property: connectionString
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
-      - key: TWELVEDATA_API_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: LLM_PROVIDER
-        value: openai
-      - key: ENVIRONMENT
-        value: production
-
-  # 3. Redis Instance (Defined as a service on Render)
-  - type: redis
-    name: ai-trader-redis
-    plan: free
-    ipAllowList: [] # Restrict access to internal services only
-
-# PostgreSQL Database Instance
+# 2. PostgreSQL Database Instance
 databases:
   - name: ai-trader-db
     plan: free
