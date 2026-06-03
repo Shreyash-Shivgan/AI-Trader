@@ -1,0 +1,225 @@
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+
+from app.config import settings
+from app.risks.manager import RiskManager
+from app.services.market_data import MarketDataError, market_data_service
+from app.services.analysis_engine import AnalysisEngine
+from app.database import SessionLocal
+
+from sqlalchemy.orm import Session
+from app.utils.formatting import format_price, generate_telegram_message
+
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+logger = logging.getLogger(__name__)
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("AI Trader Online\n\nUse /analyze XAUUSD")
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "/start\n/help\n/analyze XAUUSD\n/watch XAUUSD\n/unwatch XAUUSD\n/report\n/risk balance riskpercent\n/opentrades\n/history\n/status"
+    )
+
+
+# format_price is imported from app.utils.formatting
+
+
+async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    symbol = context.args[0].upper() if context.args else "XAUUSD"
+    symbol = symbol if "/" in symbol else f"{symbol[:3]}/{symbol[3:]}"
+    # Create a DB session for the analysis engine (closed after use)
+    db: Session | None = None
+    try:
+        db = SessionLocal()
+        engine = AnalysisEngine(db=db, market_data_service=market_data_service)
+        result = await engine.analyze_symbol(symbol, "5m", 10000.0, 1.0)
+    except MarketDataError as exc:
+        logger.error(f"[Telegram Bot] MarketDataError in analyze: {exc}", exc_info=True)
+        await update.message.reply_text("Market data is currently unavailable. Please try again later.")
+        return
+    except Exception as exc:
+        logger.error(f"[Telegram Bot] Exception in analyze: {exc}", exc_info=True)
+        await update.message.reply_text("Analysis failed. The service is temporarily unavailable.")
+        return
+    finally:
+        if db is not None:
+            db.close()
+
+    review = result.get("trade_review", {})
+    map_data = result.get("confluence_map", {})
+    trend = result.get("trend", {})
+    session = result.get("session", {})
+    smc = result.get("smart_money", {})
+    critic = result.get("critic", {})
+    trade_setup = result.get("trade_setup", {})
+
+    approved = bool(review.get("approved"))
+
+    # Format Trend
+    trend_raw = str(trend.get("trend", "sideways")).lower()
+    if "bull" in trend_raw:
+        trend_label = "Bullish"
+    elif "bear" in trend_raw:
+        trend_label = "Bearish"
+    else:
+        trend_label = "Sideways"
+
+    # Support / Resistance values
+    resistance_val = smc.get("resistance") or trade_setup.get("resistance") or "XXXX"
+    support_val = smc.get("support") or trade_setup.get("support") or "XXXX"
+
+    current_price = result.get("indicators", {}).get("latest_close", 0.0)
+    if current_price is None or current_price <= 0:
+        current_price = float(trade_setup.get("entry_price", 0.0))
+
+    logger.info(
+        f"[Telegram Output Log] analyze: Symbol={symbol}, Current Price={current_price}, "
+        f"Support={support_val}, Resistance={resistance_val}, Approved={approved}"
+    )
+
+    symbol_header = symbol.replace("/", "")
+    current_price_str = format_price(current_price)
+
+    # Expected direction
+    side_val = review.get("side", "").lower()
+    if side_val not in {"buy", "sell"}:
+        side_val = "buy" if "bull" in trend_raw else "sell"
+    expected_direction = "Bullish" if side_val == "buy" else "Bearish"
+
+    # Risk Reward
+    rr_val = float(trade_setup.get("risk_reward_ratio", 0.0) or 0.0)
+    rr_str = f"1:{rr_val:.1f}" if rr_val else "1:0.0"
+
+    # Lot size
+    lot_val = float(trade_setup.get("lot_size", 0.0) or 0.0)
+    lot_size_str = "N/A" if lot_val <= 0 else f"{lot_val:.2f}"
+
+    direction_str = "BUY" if side_val == "buy" else "SELL"
+    atr = float(result.get("indicators", {}).get("atr", 1.5) or 1.5)
+    entry_price = float(trade_setup.get("entry_price", 0.0) or 0.0)
+    stop_loss = float(trade_setup.get("stop_loss", 0.0) or 0.0)
+    tp1 = float(trade_setup.get("take_profit_1", 0.0) or 0.0)
+    tp2 = float(trade_setup.get("take_profit_2", 0.0) or 0.0)
+    tp3 = float(trade_setup.get("take_profit_3", 0.0) or 0.0)
+
+    # Determine Grade and Quality
+    confidence = float(review.get("confidence_score", map_data.get("confidence_score", 0.0)) or 0.0)
+    
+    def determine_grade(conf: float, rr: float) -> str:
+        if conf >= 85 and rr >= 3.0:
+            return "A+"
+        if conf >= 75 and rr >= 2.5:
+            return "A"
+        if conf >= 65 and rr >= 2.0:
+            return "B"
+        if conf >= 50 and rr >= 1.2:
+            return "C"
+        return "Speculative"
+
+    grade = determine_grade(confidence, rr_val)
+
+    message_text = generate_telegram_message(
+        symbol=symbol_header,
+        current_price=current_price,
+        entry_price=entry_price,
+        direction=direction_str,
+        stop_loss=stop_loss,
+        tp1=tp1,
+        tp2=tp2,
+        tp3=tp3,
+        rr=rr_val,
+        lot_size=lot_val,
+        grade=grade,
+        atr=atr,
+        support=support_val,
+        resistance=resistance_val,
+    )
+
+    await update.message.reply_text(message_text)
+
+
+async def watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    symbol = context.args[0].upper() if context.args else "XAUUSD"
+    await update.message.reply_text(f"Watchlist updated for {symbol}")
+
+
+async def unwatch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    symbol = context.args[0].upper() if context.args else "XAUUSD"
+    await update.message.reply_text(f"Watchlist removed for {symbol}")
+
+
+async def report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "Daily market report scheduling is enabled in the backend; add the scheduler job to begin publishing reports."
+    )
+
+
+async def risk(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if len(context.args) < 2:
+        await update.message.reply_text("Usage: /risk balance riskpercent")
+        return
+    account_balance = float(context.args[0])
+    risk_percent = float(context.args[1])
+    metrics = RiskManager().calculate(account_balance, risk_percent, 1.0, 2.0, None)
+    if metrics.lot_size <= 0:
+        lot_size_str = "N/A\n\nReason:\nUnable to calculate position size."
+    else:
+        lot_size_str = f"{metrics.lot_size:.4f}"
+    await update.message.reply_text(
+        f"Risk Amount: {metrics.risk_amount:.2f}\nLot Size:\n{lot_size_str}\nRR: {metrics.rr_ratio:.2f}"
+    )
+
+
+async def open_trades(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "Open trades are exposed through the API; the persistence layer will populate them once trade execution is enabled."
+    )
+
+
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "Trade history is available through the API; no trade records are persisted yet."
+    )
+
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        f"Environment: {settings.environment}\nSymbols: {', '.join(settings.default_symbols)}\nTimeframes: {', '.join(settings.monitored_timeframes)}"
+    )
+
+
+def build_application() -> Application:
+    token = settings.telegram_bot_token
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
+
+    application = Application.builder().token(token).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("analyze", analyze))
+    application.add_handler(CommandHandler("watch", watch))
+    application.add_handler(CommandHandler("unwatch", unwatch))
+    application.add_handler(CommandHandler("report", report))
+    application.add_handler(CommandHandler("risk", risk))
+    application.add_handler(CommandHandler("opentrades", open_trades))
+    application.add_handler(CommandHandler("history", history))
+    application.add_handler(CommandHandler("status", status))
+    return application
+
+
+def main() -> None:
+    application = build_application()
+    logger.info("Telegram bot starting")
+    application.run_polling()
+
+
+if __name__ == "__main__":
+    main()

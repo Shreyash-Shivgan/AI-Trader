@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+python-dotenv
+pandas
+numpy
+ta
+requests
+openai
+python-telegram-bot
+sqlalchemy
+psycopg2-binary
+redis
+httpx
+apscheduler
+asyncpg
+pytest
