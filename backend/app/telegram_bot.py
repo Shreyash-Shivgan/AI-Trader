@@ -13,7 +13,9 @@ from app.services.analysis_engine import AnalysisEngine
 from app.database import SessionLocal
 
 from sqlalchemy.orm import Session
-from app.utils.formatting import format_price, generate_telegram_message, determine_reason
+from app.utils.formatting import format_price, generate_telegram_message, determine_reason, build_dual_signal
+
+
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
@@ -152,6 +154,8 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         support=support_f,
         resistance=resistance_f,
         reason=pref_reason,
+        trend_raw=trend_raw,
+        confidence=confidence,
     )
 
     # Alternative Setup details
@@ -166,6 +170,9 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     alt_lot = float(alt_setup.get("lot_size", 0.0) or 0.0)
     alt_grade = determine_grade(confidence, alt_rr)
     alt_reason = determine_reason(alt_dir_str, alt_entry, support_f, resistance_f, atr)
+
+    # Alt trend is opposite
+    alt_trend_raw = "bearish" if "bull" in trend_raw else "bullish"
 
     alt_msg = generate_telegram_message(
         symbol=symbol_header,
@@ -183,19 +190,13 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         support=support_f,
         resistance=resistance_f,
         reason=alt_reason,
+        trend_raw=alt_trend_raw,
+        confidence=confidence,
     )
 
-    final_message = (
-        f"PREFERRED TRADE\n"
-        f"{pref_msg}\n"
-        f"\n"
-        f"---\n"
-        f"\n"
-        f"BEST ALTERNATIVE TRADE\n"
-        f"{alt_msg}"
-    )
-
+    final_message = build_dual_signal(symbol_header, pref_msg, alt_msg)
     await update.message.reply_text(final_message)
+
 
 
 async def watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
