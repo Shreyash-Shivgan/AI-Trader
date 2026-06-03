@@ -20,11 +20,17 @@ def _sync_database_url(database_url: str) -> str:
     The app uses a synchronous ORM/session pattern. If the configured URL uses
     an async driver such as asyncpg, translate it to the sync psycopg2 driver
     so startup and metadata creation can run without greenlet/await issues.
+
+    Also handles the legacy 'postgres://' scheme that Render's free PostgreSQL
+    service emits (Heroku-style), which SQLAlchemy 1.4+ no longer accepts.
     """
+    # Normalise legacy postgres:// -> postgresql:// before parsing
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
     url = make_url(database_url)
     if url.drivername.endswith("+asyncpg"):
         url = url.set(drivername=url.drivername.replace("+asyncpg", "+psycopg2"))
-    elif url.drivername == "postgresql":
+    elif url.drivername in ("postgresql", "postgresql+psycopg2"):
         url = url.set(drivername="postgresql+psycopg2")
     return url.render_as_string(hide_password=False)
 

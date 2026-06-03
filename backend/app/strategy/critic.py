@@ -16,20 +16,28 @@ async def critic_review(
     trade_setup: dict[str, Any],
     analysis_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    # Support legacy OPENAI_API_KEY env or explicit GEMINI_API_KEY
-    api_key = (
-        settings.openai_api_key
-        or os.getenv("OPENAI_API_KEY")
-        or os.getenv("GEMINI_API_KEY")
-    )
-
     # Allow caller to select LLM provider via env var. Defaults to 'openai'.
     provider = os.getenv("LLM_PROVIDER", "openai").lower()
 
-    # Auto-detect if key is a Gemini API key
+    # Support explicit GEMINI_API_KEY or legacy OPENAI_API_KEY env
+    if provider == "gemini":
+        api_key = (
+            os.getenv("GEMINI_API_KEY")
+            or settings.openai_api_key
+            or os.getenv("OPENAI_API_KEY")
+        )
+    else:
+        api_key = (
+            settings.openai_api_key
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("GEMINI_API_KEY")
+        )
+
+    # Auto-detect if key is a Gemini API key even if provider wasn't set
     if api_key and provider == "openai":
         if api_key.startswith("AIzaSy") or api_key.startswith("AQ."):
             provider = "gemini"
+
 
     analysis_context = analysis_context or {}
 
