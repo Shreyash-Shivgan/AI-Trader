@@ -1,59 +1,59 @@
 version: "3.9"
 
 services:
-	api:
-		build:
-			context: ./backend
-		container_name: ai_trader_api
-		environment:
-			- DATABASE_URL=postgresql+asyncpg://ai_trader:ai_trader@postgres:5432/ai_trader
-			- REDIS_URL=redis://redis:6379/0
-		env_file:
-			- ./.env
-		ports:
-			- "8000:8000"
-		depends_on:
-			- postgres
-			- redis
-		restart: unless-stopped
+  api:
+    build:
+      context: ./backend
+    container_name: ai_trader_api
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://ai_trader:ai_trader@postgres:5432/ai_trader
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
 
-	bot:
-		build:
-			context: ./backend
-		container_name: ai_trader_bot
-		command: python -m app.telegram_bot
-		environment:
-			- DATABASE_URL=postgresql+asyncpg://ai_trader:ai_trader@postgres:5432/ai_trader
-			- REDIS_URL=redis://redis:6379/0
-		env_file:
-			- ./.env
-		depends_on:
-			- postgres
-			- redis
-		restart: unless-stopped
+  bot:
+    build:
+      context: ./backend
+    container_name: ai_trader_bot
+    command: python -m app.telegram_bot
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://ai_trader:ai_trader@postgres:5432/ai_trader
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./.env
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
 
-	postgres:
-		image: postgres:16-alpine
-		container_name: ai_trader_postgres
-		environment:
-			POSTGRES_DB: ai_trader
-			POSTGRES_USER: ai_trader
-			POSTGRES_PASSWORD: ai_trader
-		ports:
-			- "5432:5432"
-		volumes:
-			- postgres_data:/var/lib/postgresql/data
-		restart: unless-stopped
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai_trader_postgres
+    environment:
+      POSTGRES_DB: ai_trader
+      POSTGRES_USER: ai_trader
+      POSTGRES_PASSWORD: ai_trader
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
 
-	redis:
-		image: redis:7-alpine
-		container_name: ai_trader_redis
-		ports:
-			- "6379:6379"
-		volumes:
-			- redis_data:/data
-		restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    container_name: ai_trader_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
 
 volumes:
-	postgres_data:
-	redis_data:
+  postgres_data:
+  redis_data:
