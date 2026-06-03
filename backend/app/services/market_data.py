@@ -101,6 +101,15 @@ class MarketDataService:
         return f"market_data:{symbol}:{timeframe}:{outputsize}"
 
     @staticmethod
+    def normalize_symbol(symbol: str) -> str:
+        sym = symbol.upper().replace("-", "").replace("_", "").strip()
+        if "/" in sym:
+            return sym
+        if len(sym) == 6:
+            return f"{sym[:3]}/{sym[3:]}"
+        return sym
+
+    @staticmethod
     def _normalize_frame(values: list[dict[str, Any]]) -> pd.DataFrame:
         frame = pd.DataFrame(values)
         if frame.empty:
@@ -126,6 +135,7 @@ class MarketDataService:
         return frame.reset_index(drop=True)
 
     async def get_live_price(self, symbol: str) -> dict[str, Any]:
+        symbol = self.normalize_symbol(symbol)
         cache_key = f"price:{symbol}"
         if self.redis_client:
             cached = self.redis_client.get(cache_key)
@@ -166,6 +176,7 @@ class MarketDataService:
     async def get_time_series(
         self, symbol: str, timeframe: str, outputsize: int = 200
     ) -> CandleFrame:
+        symbol = self.normalize_symbol(symbol)
         cache_key = self._cache_key(symbol, timeframe, outputsize)
         if self.redis_client:
             cached = self.redis_client.get(cache_key)
