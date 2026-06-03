@@ -26,7 +26,7 @@ def _sync_database_url(database_url: str) -> str:
         url = url.set(drivername=url.drivername.replace("+asyncpg", "+psycopg2"))
     elif url.drivername == "postgresql":
         url = url.set(drivername="postgresql+psycopg2")
-    return str(url)
+    return url.render_as_string(hide_password=False)
 
 
 engine = create_engine(
