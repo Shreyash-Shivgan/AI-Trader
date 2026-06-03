@@ -26,11 +26,33 @@ import threading
 import os
 
 def run_bot_in_background():
-    from app.telegram_bot import main as bot_main
+    """Run the Telegram bot in a background thread with its own event loop.
+
+    python-telegram-bot's run_polling() installs OS signal handlers, which
+    Python only allows in the main thread.  We bypass that by driving the
+    polling loop manually via the lower-level async API.
+    """
+    import asyncio
+    from app.telegram_bot import build_application
+
+    async def _poll():
+        app = build_application()
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        logging.info("Telegram Bot polling started (background thread)")
+        # Keep the coroutine alive until the process exits
+        stop_event = asyncio.Event()
+        await stop_event.wait()
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        bot_main()
+        loop.run_until_complete(_poll())
     except Exception as exc:
         logging.error("Telegram bot background thread failed: %s", exc, exc_info=True)
+    finally:
+        loop.close()
 
 
 @asynccontextmanager
