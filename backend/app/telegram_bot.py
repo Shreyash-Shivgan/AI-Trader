@@ -43,12 +43,13 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         result = await engine.analyze_symbol(symbol, "5m", 10000.0, 1.0)
     except MarketDataError as exc:
         logger.error(f"[Telegram Bot] MarketDataError in analyze: {exc}", exc_info=True)
-        await update.message.reply_text("Market data is currently unavailable. Please try again later.")
+        await update.message.reply_text(f"❌ Market data error:\n<code>{exc}</code>", parse_mode="HTML")
         return
     except Exception as exc:
         logger.error(f"[Telegram Bot] Exception in analyze: {exc}", exc_info=True)
-        await update.message.reply_text("Analysis failed. The service is temporarily unavailable.")
+        await update.message.reply_text(f"❌ Analysis error:\n<code>{type(exc).__name__}: {exc}</code>", parse_mode="HTML")
         return
+
     finally:
         if db is not None:
             db.close()

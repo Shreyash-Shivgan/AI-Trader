@@ -62,8 +62,16 @@ class TwelveDataClient:
         }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.get(f"{self.base_url}/time_series", params=params)
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After", "60")
+                raise MarketDataError(
+                    f"TwelveData API rate limit hit (429). "
+                    f"Free plan allows 8 requests/min. "
+                    f"Retry after {retry_after}s or upgrade your plan at twelvedata.com."
+                )
             response.raise_for_status()
             payload = response.json()
+
         logger.info(f"[Market API] Raw Time Series API Response for {symbol} ({interval}): {payload}")
         if payload.get("status") == "error":
             raise MarketDataError(payload.get("message", "Unable to fetch time series"))
