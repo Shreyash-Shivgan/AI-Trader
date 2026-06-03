@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import logging
+import os
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from telegram import Update
 
 from app.config import settings
 from app.database import init_db
@@ -18,61 +21,63 @@ from app.routes.signals import router as signals_router
 from app.routes.trades import router as trades_router
 from app.services.market_data import MarketDataError, market_data_service
 from app.services.scanner import scanner_service
+from app.telegram_bot import build_application
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
-
-
-import threading
-import os
-
-def run_bot_in_background():
-    """Run the Telegram bot in a background thread with its own event loop.
-
-    python-telegram-bot's run_polling() installs OS signal handlers, which
-    Python only allows in the main thread.  We bypass that by driving the
-    polling loop manually via the lower-level async API.
-    """
-    import asyncio
-    from app.telegram_bot import build_application
-
-    async def _poll():
-        app = build_application()
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling(drop_pending_updates=True)
-        logging.info("Telegram Bot polling started (background thread)")
-        # Keep the coroutine alive until the process exits
-        stop_event = asyncio.Event()
-        await stop_event.wait()
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(_poll())
-    except Exception as exc:
-        logging.error("Telegram bot background thread failed: %s", exc, exc_info=True)
-    finally:
-        loop.close()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize Database
     try:
         init_db()
     except Exception as exc:
-        logging.warning("Database initialization skipped: %s", exc)
+        logger.warning("Database initialization skipped: %s", exc)
     else:
-        # start background scanner only when the DB is reachable
+        # Start background scanner only when the DB is reachable
         scanner_service.start()
-        
-    # Run bot in the same process/container if enabled
+
+    # Initialize Telegram Bot
+    telegram_app = None
     if settings.telegram_bot_token and os.getenv("RUN_BOT_IN_APP", "true").lower() == "true":
-        logging.info("Starting Telegram Bot in background thread...")
-        threading.Thread(target=run_bot_in_background, daemon=True).start()
-        
+        try:
+            logger.info("Initializing Telegram Bot...")
+            telegram_app = build_application()
+            await telegram_app.initialize()
+            await telegram_app.start()
+
+            render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+            if settings.environment == "production" and render_host:
+                # Webhook Mode: Telegram will wake up the Render service on new messages
+                webhook_url = f"https://{render_host}/webhook/telegram"
+                logger.info(f"Configuring Telegram Webhook at: {webhook_url}")
+                await telegram_app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+            else:
+                # Polling Mode: Ideal for local development
+                logger.info("Starting Telegram Bot polling loop...")
+                await telegram_app.updater.start_polling(drop_pending_updates=True)
+
+            app.state.telegram_app = telegram_app
+        except Exception as exc:
+            logger.error("Failed to start Telegram Bot: %s", exc, exc_info=True)
+
     yield
-    # shutdown background scanner
+
+    # Shutdown background scanner
     scanner_service.shutdown()
+
+    # Shutdown Telegram Bot
+    if telegram_app:
+        try:
+            logger.info("Stopping Telegram Bot...")
+            if telegram_app.updater and telegram_app.updater.running:
+                await telegram_app.updater.stop()
+            await telegram_app.stop()
+            await telegram_app.shutdown()
+            logger.info("Telegram Bot stopped successfully.")
+        except Exception as exc:
+            logger.error("Error during Telegram Bot shutdown: %s", exc, exc_info=True)
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -81,6 +86,28 @@ app.include_router(analysis_router)
 app.include_router(signals_router)
 app.include_router(trades_router)
 app.include_router(performance_router)
+
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(request: Request) -> dict[str, str]:
+    """Webhook endpoint for receiving Telegram updates in production.
+
+    This wakes up the Render container instantly when a message is received.
+    """
+    telegram_app = getattr(request.app.state, "telegram_app", None)
+    if not telegram_app:
+        raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
+
+    try:
+        payload = await request.json()
+        update = Update.de_json(payload, telegram_app.bot)
+        if update:
+            await telegram_app.process_update(update)
+    except Exception as exc:
+        logger.error("Error processing Telegram update via webhook: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {"status": "ok"}
 
 
 @app.get("/")
